@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+.env
+
+# Course materials and local planning notes (not part of the submission)
+code-snippets/
+specs/
