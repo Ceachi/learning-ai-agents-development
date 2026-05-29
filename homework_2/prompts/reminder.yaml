@@ -1,0 +1,15 @@
+name: reminder
+version: 1.1.0
+description: >
+  Short reminder appended to the user message each turn to combat
+  "lost in the middle" in long ReAct conversations. Applied as a user-message
+  wrapper at runtime, not baked into the system prompt.
+variables: []
+metadata:
+  category: wrapper
+  language: en
+  author: ceachi-bogdan
+prompt: |
+  ---
+  Reminder: only call tools that exist, never invent parameters or values,
+  and ask for clarification if the request is ambiguous.
