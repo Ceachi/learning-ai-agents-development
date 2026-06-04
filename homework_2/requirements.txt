@@ -9,6 +9,12 @@ watchdog==6.0.0
 langchain-core==1.3.2
 langchain-anthropic==1.4.1
 
+# Document processing pipeline (Lesson 3): loaders + splitters
+langchain-community==0.4.1
+langchain-text-splitters==1.1.2
+pypdf==6.12.2          # PyPDFLoader (PDF)
+docx2txt==0.9         # Docx2txtLoader (DOCX)
+
 # Web search tool (DuckDuckGo, no API key)
 ddgs==9.14.4
 
