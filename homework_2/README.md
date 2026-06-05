@@ -4,7 +4,7 @@ A ReAct agent that **extracts** structured data from invoices/contracts, **store
 them (with embeddings) in PostgreSQL/pgvector, and **answers questions grounded in
 those documents** via RAG — citing the source.
 
-It does four things:
+What it does:
 
 1. **Extraction** — load a PDF/DOCX/TXT/CSV, chunk it, extract structured fields
    into Pydantic schemas (`Invoice`/`Contract`), save JSON.
@@ -17,108 +17,126 @@ It does four things:
 
 ---
 
+## Contents
+
+- [Prerequisites](#prerequisites)
+- [1. Direct setup (recommended)](#1-direct-setup-recommended) — install and run; the database, index and sample documents are set up for you.
+- [2. Step-by-step (optional)](#2-step-by-step-optional) — reset everything and run each step, including the test suite.
+- [Interacting with the agent](#interacting-with-the-agent)
+- [Inspect the database](#inspect-the-database)
+- [Stop / reset](#stop--reset)
+- [Project structure](#project-structure) · [How it works](#how-it-works)
+
+---
+
 ## Prerequisites
 
 - **Docker Desktop** running (for PostgreSQL + pgvector).
-- **Python 3.11** and the project dependencies (see step 1).
-- An **Anthropic API key** (the agent and extraction call the LLM). The embedding
+- **Python 3.11**.
+- An **Anthropic API key** — the agent and extraction call the LLM. The embedding
   step runs locally and is free.
 
----
-
-## Quick start (run it from scratch)
-
-All commands run from this `homework_2/` folder.
-
-### 1. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-> Installs LangChain + Anthropic, document loaders, SQLAlchemy + pgvector + Alembic,
-> and sentence-transformers (this pulls in `torch`, which is large).
-
-### 2. Configure secrets
-
-```bash
-cp .env_example .env
-# edit .env and set: ANTHROPIC_API_KEY=sk-ant-...
-```
-
-`.env` already contains the database settings (`DATABASE_URL`, `POSTGRES_*`).
-
-### 3. Start the database
-
-```bash
-docker compose up -d --wait
-```
-
-> Starts PostgreSQL with the pgvector extension and waits until it is healthy.
-> Check anytime with `docker compose ps`.
-
-### 4. Create the tables (migrations)
-
-```bash
-alembic upgrade head
-```
-
-> Enables the `vector` extension and creates the `documents` and `document_chunks`
-> tables. Verify with `alembic current` (should print `0002_document_chunks (head)`).
-
-### 5. (Optional) Build the HNSW index
-
-```bash
-python -m db.create_index
-```
-
-> Adds an HNSW index for fast similarity search. Not required for a few documents.
-
-### 6. Run the tests
-
-```bash
-pytest -q
-```
-
-> Expect `58 passed`. Pure tests need nothing; database/RAG tests run real CRUD and
-> similarity search and **skip automatically** if the database is not up.
+All commands below run from this `homework_2/` folder, with your Python
+environment active.
 
 ---
 
-## Try it
+## 1. Direct setup (recommended)
 
-### A. Extract structured data from a document
-
-```bash
-python3 -c "from extraction import extract_document; inv = extract_document('samples/factura_001.txt','factura'); print(inv.numar, inv.total, inv.furnizor)"
-```
-
-> Prints `FV-2024-001 18088.0 SC TechPro Solutions SRL` and writes
-> `extracted_data/factura/FV-2024-001.json`. (Calls the LLM.)
-
-### B. Index documents for question-answering
-
-The agent can answer about document content only after you index some documents:
+Everything is set up for you — three commands and you can chat with the agent:
 
 ```bash
-python3 -c "
-from rag import index_documents
-docs = index_documents(['samples/contract_servicii.txt','samples/contract_consultanta.txt','samples/factura_001.txt'])
-print('indexed:', [d.filename for d in docs])
-"
+pip install -r requirements.txt    # install dependencies
+cp .env_example .env               # then edit .env: set ANTHROPIC_API_KEY=sk-ant-...
+bash setup.sh                      # start DB + migrate + build index + index samples
 ```
 
-> Loads, chunks, embeds, and stores each file (Document + chunks), with a progress
-> bar over the files. Idempotent: running it again does not duplicate. (Local
-> embeddings, no LLM call.) For a single file, use `index_document(path)`.
+`setup.sh` starts PostgreSQL (Docker), applies the migrations, builds the HNSW
+similarity index, and indexes the sample invoices/contracts — so RAG is ready.
 
-### C. Ask the agent (interactive)
+Then go to **[Interacting with the agent](#interacting-with-the-agent)**.
+
+> The first run downloads the embedding model (~470 MB) once.
+
+---
+
+## 2. Step-by-step (optional)
+
+Use this to verify the project from a clean slate and run the test suite.
+
+**Reset first (start from nothing):**
+
+```bash
+docker compose down -v     # remove the database container + all its data
+```
+
+**Then run each step:**
+
+1. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+   > LangChain + Anthropic, document loaders, SQLAlchemy + pgvector + Alembic,
+   > sentence-transformers (pulls in `torch`, which is large).
+
+2. **Configure secrets**
+   ```bash
+   cp .env_example .env     # then set ANTHROPIC_API_KEY in .env
+   ```
+   `.env` already contains the database settings (`DATABASE_URL`, `POSTGRES_*`).
+
+3. **Start the database**
+   ```bash
+   docker compose up -d --wait
+   ```
+   > Starts PostgreSQL with pgvector and waits until healthy. Check: `docker compose ps`.
+
+4. **Create the tables (migrations)**
+   ```bash
+   alembic upgrade head
+   ```
+   > Enables the `vector` extension and creates `documents` + `document_chunks`.
+   > Verify: `alembic current` → `0002_document_chunks (head)`.
+
+5. **Build the HNSW index** (optional)
+   ```bash
+   python -m db.create_index
+   ```
+
+6. **Run the tests**
+   ```bash
+   pytest -q
+   ```
+   > Expect `58 passed`. Pure tests need nothing; database/RAG tests run real CRUD
+   > and similarity search, and **skip automatically** if the database is down.
+
+7. **Index the sample documents**
+   ```bash
+   python3 -c "from pathlib import Path; from rag import index_documents; index_documents(sorted(str(p) for p in Path('samples').glob('*.txt')))"
+   ```
+   > Loads, chunks, embeds, and stores each file (Document + chunks), with a progress
+   > bar. Idempotent — running it again does not duplicate.
+
+8. **(Optional) Try extraction → JSON**
+   ```bash
+   python3 -c "from extraction import extract_document; inv = extract_document('samples/factura_001.txt','factura'); print(inv.numar, inv.total, inv.furnizor)"
+   ```
+   > Prints `FV-2024-001 18088.0 SC TechPro Solutions SRL` and writes
+   > `extracted_data/factura/FV-2024-001.json` (the folder is created automatically).
+
+Then go to **[Interacting with the agent](#interacting-with-the-agent)**.
+
+---
+
+## Interacting with the agent
+
+Start the interactive console:
 
 ```bash
 python agent.py
 ```
 
-Then type questions, for example:
+Type questions, for example:
 
 ```
 You> Ce clauze de reziliere avem?
@@ -142,7 +160,7 @@ python3 -c "from agent import ask; print(ask('Care este totalul facturii FV-2024
 
 ---
 
-## Inspect the database (optional)
+## Inspect the database
 
 ```bash
 docker compose exec db psql -U analyst -d document_analyst
@@ -170,6 +188,7 @@ docker compose down -v   # remove container + data (full reset)
 ```
 homework_2/
 ├── agent.py                 # LLMFactory, ReAct loop, entry points (ask/chat)
+├── setup.sh                 # one-shot setup (DB + migrate + index + samples)
 ├── docker-compose.yml       # PostgreSQL + pgvector
 ├── alembic.ini              # Alembic config (migrations live in db/alembic/)
 ├── tools/                   # calculator, datetime, web_search,
