@@ -228,3 +228,6 @@ resources/
 
 # Generated extraction output (reproducible from samples via the pipeline)
 extracted_data/
+
+# macOS
+.DS_Store
