@@ -1,173 +1,204 @@
-# Document Analyst Agent — Extraction Pipeline + Tools + ReAct
+# Document Analyst Agent
 
-Homework 2 (Document Analyst cu RAG). Builds on the Lesson 1–2 QA agent by adding
-the **Lesson 3 document-extraction pipeline** (`Load → Chunk → Extract → Save`) and
-wrapping it as agent tools, so the same ReAct agent can now extract structured data
-from invoices and contracts.
+A ReAct agent that **extracts** structured data from invoices/contracts, **stores**
+them (with embeddings) in PostgreSQL/pgvector, and **answers questions grounded in
+those documents** via RAG — citing the source.
 
-> **Scope of this homework.** The full assignment (hw4) has 4 parts. Implemented
-> here is **Part 1 — Extraction Pipeline (L3)**. Parts 2–4 (PostgreSQL + pgvector,
-> RAG with embeddings, RAG-as-tool) are Lesson 4 and will be added later.
+It does four things:
 
-## Features
+1. **Extraction** — load a PDF/DOCX/TXT/CSV, chunk it, extract structured fields
+   into Pydantic schemas (`Invoice`/`Contract`), save JSON.
+2. **Storage** — `Document` + `DocumentChunk` (one-to-many) in PostgreSQL with
+   pgvector, via Alembic migrations and a Repository layer.
+3. **RAG** — embed each chunk (sentence-transformers), cosine similarity search
+   with an HNSW index.
+4. **Agent** — a `search_documents` tool lets the agent answer from the indexed
+   documents and cite the source filename.
 
-- **Document extraction pipeline (L3)** — `Load → Chunk → Extract → Save`:
-  - a **loader registry** over file extension (PDF / DOCX / TXT / CSV);
-  - **chunking** with `RecursiveCharacterTextSplitter`, applied only when a
-    document is large (> ~4K chars);
-  - **structured extraction** into Pydantic schemas (`Invoice`, `Contract`) via
-    LangChain `with_structured_output`;
-  - **organized JSON output** under `extracted_data/<type>/<numar>.json`.
-- **Tools with Pydantic** — each tool declares its parameters as a Pydantic
-  `BaseModel`; a `@register_tool` decorator validates and auto-registers them.
-- **Prompts as configuration** — prompts live in versioned YAML files, rendered
-  with Jinja2, with an automatic variable contract.
-- **ReAct agent** — the LLM requests tools, the app executes them, results flow
-  back as observations until a final answer is produced.
-- **Provider-agnostic** — an `LLMFactory` supports Anthropic, OpenAI, Google,
-  and Ollama (default: Anthropic). The extraction pipeline reuses the same factory.
+---
+
+## Prerequisites
+
+- **Docker Desktop** running (for PostgreSQL + pgvector).
+- **Python 3.11** and the project dependencies (see step 1).
+- An **Anthropic API key** (the agent and extraction call the LLM). The embedding
+  step runs locally and is free.
+
+---
+
+## Quick start (run it from scratch)
+
+All commands run from this `homework_2/` folder.
+
+### 1. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+> Installs LangChain + Anthropic, document loaders, SQLAlchemy + pgvector + Alembic,
+> and sentence-transformers (this pulls in `torch`, which is large).
+
+### 2. Configure secrets
+
+```bash
+cp .env_example .env
+# edit .env and set: ANTHROPIC_API_KEY=sk-ant-...
+```
+
+`.env` already contains the database settings (`DATABASE_URL`, `POSTGRES_*`).
+
+### 3. Start the database
+
+```bash
+docker compose up -d --wait
+```
+
+> Starts PostgreSQL with the pgvector extension and waits until it is healthy.
+> Check anytime with `docker compose ps`.
+
+### 4. Create the tables (migrations)
+
+```bash
+alembic upgrade head
+```
+
+> Enables the `vector` extension and creates the `documents` and `document_chunks`
+> tables. Verify with `alembic current` (should print `0002_document_chunks (head)`).
+
+### 5. (Optional) Build the HNSW index
+
+```bash
+python -m db.create_index
+```
+
+> Adds an HNSW index for fast similarity search. Not required for a few documents.
+
+### 6. Run the tests
+
+```bash
+pytest -q
+```
+
+> Expect `58 passed`. Pure tests need nothing; database/RAG tests run real CRUD and
+> similarity search and **skip automatically** if the database is not up.
+
+---
+
+## Try it
+
+### A. Extract structured data from a document
+
+```bash
+python3 -c "from extraction import extract_document; inv = extract_document('samples/factura_001.txt','factura'); print(inv.numar, inv.total, inv.furnizor)"
+```
+
+> Prints `FV-2024-001 18088.0 SC TechPro Solutions SRL` and writes
+> `extracted_data/factura/FV-2024-001.json`. (Calls the LLM.)
+
+### B. Index documents for question-answering
+
+The agent can answer about document content only after you index some documents:
+
+```bash
+python3 -c "
+from rag import index_documents
+docs = index_documents(['samples/contract_servicii.txt','samples/contract_consultanta.txt','samples/factura_001.txt'])
+print('indexed:', [d.filename for d in docs])
+"
+```
+
+> Loads, chunks, embeds, and stores each file (Document + chunks), with a progress
+> bar over the files. Idempotent: running it again does not duplicate. (Local
+> embeddings, no LLM call.) For a single file, use `index_document(path)`.
+
+### C. Ask the agent (interactive)
+
+```bash
+python agent.py
+```
+
+Then type questions, for example:
+
+```
+You> Ce clauze de reziliere avem?
+You> Care este totalul facturii FV-2024-001?
+You> Care sunt obligatiile prestatorului din contractul de servicii?
+You> Cât face 15200 * 0.19?
+You> exit
+```
+
+> Tool calls are shown inline (`[tool] search_documents(...)` → `[result] ...`),
+> then the final answer with the cited source `[filename]`. The agent picks the
+> right tool by itself: `search_documents` for document content, `calculator` for
+> math, `extract_invoice_tool` / `extract_contract_tool` to process a new file.
+> Commands: `reset` clears history, `exit` / `quit` leaves.
+
+One-off, non-interactive:
+
+```bash
+python3 -c "from agent import ask; print(ask('Care este totalul facturii FV-2024-001?'))"
+```
+
+---
+
+## Inspect the database (optional)
+
+```bash
+docker compose exec db psql -U analyst -d document_analyst
+```
+
+```sql
+\dt                                  -- list tables
+SELECT id, filename FROM documents;  -- indexed documents
+SELECT d.filename, count(c.id) FROM documents d
+  JOIN document_chunks c ON c.document_id = d.id GROUP BY d.filename;  -- chunks per doc
+\q
+```
+
+## Stop / reset
+
+```bash
+docker compose stop      # stop, keep the data
+docker compose down -v   # remove container + data (full reset)
+```
+
+---
 
 ## Project structure
 
 ```
 homework_2/
 ├── agent.py                 # LLMFactory, ReAct loop, entry points (ask/chat)
-├── tools/
-│   ├── params_models.py     # Pydantic BaseModel per basic tool
-│   ├── registry.py          # TOOL_REGISTRY + @register_tool decorator
-│   ├── basic_tools.py       # calculator, get_datetime, web_search
-│   ├── extraction_tools.py  # extract_invoice_tool, extract_contract_tool
-│   ├── tool_wrapper.py      # ToolWrapper.call() + catalog()
-│   └── __init__.py          # exports ToolWrapper, auto-registers all tools
-├── extraction/              # Lesson 3 pipeline: Load → Chunk → Extract → Save
-│   ├── loaders.py           # LOADER_REGISTRY + load_document()
-│   ├── schemas.py           # Product, Invoice, Contract (Pydantic)
-│   ├── chunking.py          # should_chunk() + chunk_documents()
-│   ├── storage.py           # save_json()
-│   ├── pipeline.py          # ExtractionPipeline + EXTRACTION_REGISTRY + extract_document()
-│   └── __init__.py          # public API
-├── prompts/
-│   ├── registry.py          # PromptTemplate, PromptRegistry, hot reload
-│   ├── planner.yaml         # ReAct system prompt (the agent)
-│   ├── analyst.yaml / summary.yaml / extract.yaml / reminder.yaml
-├── samples/                 # test invoices/contracts (txt, csv)
-├── extracted_data/          # generated JSON output (gitignored)
-├── tests/                   # smoke tests (no LLM calls)
-├── conftest.py              # pytest setup
-└── requirements.txt
+├── docker-compose.yml       # PostgreSQL + pgvector
+├── alembic.ini              # Alembic config (migrations live in db/alembic/)
+├── tools/                   # calculator, datetime, web_search,
+│                            #   extract_invoice/contract, search_documents
+├── extraction/              # loaders, schemas, chunking, pipeline (Load→Chunk→Extract→Save)
+├── db/                      # database, models, repositories, exceptions, create_index
+│   └── alembic/             #   migrations (documents, document_chunks)
+├── rag/                     # service (embed/search), indexing (index_document/index_documents)
+├── prompts/                 # planner.yaml + task prompts (YAML + Jinja2)
+├── samples/                 # example invoices/contracts
+└── tests/                   # pure + DB-integration tests (auto-skip without DB)
 ```
 
-API keys live in `.env` in this folder (see `.env_example`).
+## How it works
 
-## Setup
-
-```bash
-# from homework_2/
-pip install -r requirements.txt
-
-# configure your key: copy the template and add your key
-cp .env_example .env
-# then edit .env and set ANTHROPIC_API_KEY=...
-```
-
-## Usage
-
-### Extract a document (programmatic)
-
-```python
-from extraction import extract_document
-
-# Load → Chunk (if needed) → Extract → Save; returns a validated Pydantic object
-invoice = extract_document("samples/factura_001.txt", "factura")
-print(invoice.numar, invoice.total)        # FV-2024-001 18088.0
-# -> saved to extracted_data/factura/FV-2024-001.json
-
-contract = extract_document("samples/contract_servicii.txt", "contract")
-print(contract.prestator, contract.durata_luni)
-```
-
-Use the pipeline directly for a custom schema:
-
-```python
-from extraction import ExtractionPipeline, Invoice
-invoice = ExtractionPipeline().process("samples/factura_001.txt", Invoice)
-```
-
-### Through the agent (it picks the tool itself)
-
-```python
-from agent import ask
-
-print(ask("Procesează factura din samples/factura_001.txt și spune-mi furnizorul și totalul."))
-# The agent selects extract_invoice_tool, runs the pipeline, and reports the result.
-```
-
-The agent chooses `extract_invoice_tool` vs `extract_contract_tool` automatically
-based on the tool **docstrings** — no manual if/else, no prompt change required.
-
-### Interactive chat (console)
-
-Run from `homework_2/`:
-
-```bash
-python agent.py
-```
-
-Multi-turn conversation; history is kept across turns and tool calls are shown
-inline so you can watch Think → Act → Observe. Commands: `exit` / `quit`, `reset`.
-
-## How extraction works
-
-1. **Load** — `load_document(path)` looks up a loader by file extension in
-   `LOADER_REGISTRY` and returns a uniform `list[Document]`. Unsupported types
-   raise `ValueError`; a missing file raises `FileNotFoundError`.
-2. **Chunk** — `should_chunk(docs)` is `True` only for large documents (> 4K
-   chars); then `chunk_documents()` splits with `RecursiveCharacterTextSplitter`.
-   Invoices are small, so they skip chunking.
-3. **Extract** — `ExtractionPipeline.process(path, schema)` sends the text to the
-   LLM via `llm.with_structured_output(schema)` and returns a validated object.
-4. **Save** — `save_json()` writes `extracted_data/<doc_type>/<numar>.json`
-   (`ensure_ascii=False`, so Romanian diacritics are preserved).
-
-`EXTRACTION_REGISTRY` routes a `doc_type` ("factura" / "contract") to its schema
-and chunk policy — a new document type is one dict entry.
-
-> **Design note.** The L3 slides extract with Google Gemini (`genai.Client` +
-> `response_schema`). This project keeps the exact L3 *structure* but performs the
-> extract step with **LangChain + Anthropic** via the existing `LLMFactory` and
-> `with_structured_output` — matching the hw4 flow box and reusing the L1–L2 agent
-> (one provider, one key).
-
-## Adding a tool
-
-```python
-# tools/extraction_tools.py (or basic_tools.py)
-class MyToolParams(BaseModel):
-    value: str = Field(description="...")
-
-@register_tool
-def my_tool(params: MyToolParams) -> dict:
-    '''Clear description: what it does, when to use it, an example.'''
-    ...
-```
-
-The decorator enforces a single `BaseModel` parameter and a meaningful docstring
-(which becomes the description the LLM uses to decide when to call the tool).
-
-## Testing
-
-```bash
-pytest -v
-```
-
-Smoke tests cover tool registration, the safe (AST-based) calculator, Pydantic
-validation, prompt loading/rendering — and the extraction pipeline's load / chunk /
-schema / save steps and tool registration — all **without making LLM calls**.
+- **Extraction:** `load_document()` resolves a loader by file extension; large text
+  is chunked; `ExtractionPipeline.process()` calls `llm.with_structured_output(schema)`;
+  `save_json()` writes per-type JSON.
+- **Storage + RAG:** `index_document()` loads + chunks a file, embeds the chunks, and
+  stores a `Document` plus its `DocumentChunk`s in one transaction (idempotent on
+  filename). `RAGService.search(query, top_k)` embeds the query and runs cosine
+  similarity search; `search_documents` exposes this to the agent.
+- **Language:** answers follow the user's language; the embedding model is multilingual
+  (Romanian-friendly).
 
 ## Design patterns
 
-- **Registry** — `TOOL_REGISTRY`, `PromptRegistry`, `LOADER_REGISTRY`, `EXTRACTION_REGISTRY`
+- **Registry** — tools, prompts, loaders, extraction routing
+- **Repository** — `DocumentRepository`, `ChunkRepository` (+ `transaction()` unit of work)
 - **Decorator** — `@register_tool`
-- **Factory** — `LLMFactory`
-- **Singleton** — `get_prompt_registry()` (via `lru_cache`)
-- **Pipeline** — `ExtractionPipeline` (Load → Chunk → Extract → Save)
+- **Factory** — `LLMFactory` (Anthropic / OpenAI / Google / Ollama)
+- **Pipeline** — `ExtractionPipeline` (Load → Chunk → Extract → Save) + `index_document`

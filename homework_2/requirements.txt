@@ -9,11 +9,19 @@ watchdog==6.0.0
 langchain-core==1.3.2
 langchain-anthropic==1.4.1
 
-# Document processing pipeline (Lesson 3): loaders + splitters
+# Document processing pipeline: loaders + splitters
 langchain-community==0.4.1
 langchain-text-splitters==1.1.2
 pypdf==6.12.2          # PyPDFLoader (PDF)
 docx2txt==0.9         # Docx2txtLoader (DOCX)
+
+# Storage + RAG: PostgreSQL + pgvector + migrations
+SQLAlchemy==2.0.49
+psycopg2-binary==2.9.10  # PostgreSQL driver
+pgvector==0.4.1          # Vector column + cosine_distance for SQLAlchemy
+alembic==1.16.1          # schema migrations
+sentence-transformers>=2.2.0  # embeddings (paraphrase-multilingual-MiniLM-L12-v2, 384-dim)
+tqdm>=4.66.0                  # progress bars (batch indexing + embeddings)
 
 # Web search tool (DuckDuckGo, no API key)
 ddgs==9.14.4

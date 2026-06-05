@@ -1,5 +1,5 @@
 '''
-save_json — the SAVE step of the pipeline (Lesson 3, §4).
+save_json — the SAVE step of the pipeline.
 
 Writes an extracted Pydantic object to extracted_data/<doc_type>/<numar>.json,
 organized per document type (facturi/, contracte/). mkdir(parents=True,

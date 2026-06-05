@@ -1,12 +1,11 @@
 '''
-Chunking — the CHUNK step of the pipeline (Lesson 3, §2).
+Chunking — the CHUNK step of the pipeline.
 
-Rule of thumb from L3: chunk ONLY when a document does not fit comfortably in the
-context window. A small document (< ~4000 chars) goes straight to the LLM.
+Chunk ONLY when a document does not fit comfortably in the context window; a
+small document (< ~4000 chars) goes straight to the LLM.
 
-Defaults follow the lesson's "best practice": chunk_size=1000, overlap=100, using
-RecursiveCharacterTextSplitter (paragraphs -> lines -> words -> chars), which
-keeps the semantic structure intact and works well in ~90% of cases.
+Defaults: chunk_size=1000, overlap=100, using RecursiveCharacterTextSplitter
+(paragraphs -> lines -> words -> chars), which keeps the semantic structure intact.
 '''
 
 from langchain_core.documents import Document
@@ -18,7 +17,7 @@ def should_chunk(docs: list[Document], max_size: int = 4000) -> bool:
     Decide whether the loaded document needs chunking.
 
     Returns True when the combined page_content exceeds max_size characters.
-    (L3: an invoice ~2K chars -> no; a contract/report -> yes.)
+    (an invoice ~2K chars -> no; a contract/report -> yes.)
     '''
     total = sum(len(doc.page_content) for doc in docs)
     return total > max_size

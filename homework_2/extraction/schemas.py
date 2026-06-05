@@ -1,5 +1,5 @@
 '''
-Pydantic schemas for structured extraction (Lesson 3, §3).
+Pydantic schemas for structured extraction.
 
 BaseModel = single source of truth: type safety + validation + documentation.
 Each Field(description=...) guides the LLM on WHAT to extract — the more precise

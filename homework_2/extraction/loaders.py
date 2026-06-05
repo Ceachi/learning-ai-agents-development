@@ -1,15 +1,13 @@
 '''
-LOADER_REGISTRY + load_document — the LOAD step of the pipeline (Lesson 3, §1).
+LOADER_REGISTRY + load_document — the LOAD step of the pipeline.
 
 A single entry point that parses any supported format (PDF / DOCX / TXT / CSV)
 and always returns the same shape: a list of langchain_core Document objects
 (page_content + metadata).
 
-Registry Pattern — same idea as TOOL_REGISTRY (Phase 1): a new format is one
-line in the dict, with zero changes to load_document().
-
-Why community loaders (L3 §1): tested + maintained, uniform .load() API, they
-handle edge cases (encoding, corrupt PDFs) so we don't hand-roll parsing.
+Registry pattern: a new format is one line in the dict, with zero changes to
+load_document(). Community loaders are used because they are tested, expose a
+uniform .load() API, and handle edge cases (encoding, corrupt PDFs).
 '''
 
 from pathlib import Path
@@ -25,7 +23,7 @@ from langchain_core.documents import Document
 
 def _text_loader(path: str) -> TextLoader:
     # TextLoader needs explicit UTF-8 so Romanian diacritics (ă, î, ș, ț) survive.
-    # cp1250 vs UTF-8 is the classic TXT encoding bug called out in L3 §1.
+    # cp1250 vs UTF-8 is the classic TXT encoding bug.
     return TextLoader(path, encoding="utf-8")
 
 

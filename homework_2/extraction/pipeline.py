@@ -1,14 +1,10 @@
 '''
-ExtractionPipeline + EXTRACTION_REGISTRY + extract_document — the full pipeline
-(Lesson 3, §4): Load -> Chunk -> Extract -> Save.
+ExtractionPipeline + EXTRACTION_REGISTRY + extract_document — the full pipeline:
+Load -> Chunk -> Extract -> Save.
 
-Design note (see specs/README.md, Bloc B): the L3 slides extract with Google
-Gemini (genai.Client + response_schema). We keep the exact L3 STRUCTURE but the
-extract step uses LangChain + Anthropic via the existing LLMFactory and
-llm.with_structured_output(schema) — exactly as the hw4.pdf flow shows
-(`data = llm.with_structured_output(Invoice)`). One provider across the project.
-
-The LLM client is lazy (created on first use), so the pipeline is safe to
+The extract step uses LangChain + Anthropic via the shared LLMFactory and
+llm.with_structured_output(schema), so extraction returns a validated Pydantic
+object. The LLM client is lazy (created on first use), so the pipeline is safe to
 instantiate without an API key and safe to reuse across processes.
 '''
 
@@ -65,8 +61,7 @@ class ExtractionPipeline:
         Run Load -> Chunk (if needed) -> Extract and return a validated object.
 
         For large documents we combine the first 3 chunks — in invoices and
-        contracts the key info (number, parties, totals) sits at the start
-        (L3, "Pipeline: Document Mare").
+        contracts the key info (number, parties, totals) sits at the start.
         '''
         # 1. Load
         docs = load_document(file_path)
@@ -84,7 +79,7 @@ class ExtractionPipeline:
 
 
 # ---------------------------------------------------------------------------
-# Routing by document type (L3 §4, slide46) — a new type is one dict entry.
+# Routing by document type — a new type is one dict entry.
 # ---------------------------------------------------------------------------
 EXTRACTION_REGISTRY: dict[str, dict] = {
     "factura": {"schema": Invoice, "chunk_size": None},    # invoices are small -> no chunking

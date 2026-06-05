@@ -180,7 +180,7 @@ def ask(question: str, **prompt_overrides) -> str:
 
 
 # ---------------------------------------------------------------------------
-# One-shot chat (Phase 3) — kept as a simpler reference; handles AT MOST one
+# One-shot chat — kept as a simpler reference; handles AT MOST one
 # round of tool use. For multi-step reasoning use ask() / react_loop().
 # ---------------------------------------------------------------------------
 def chat(question: str, system_prompt: str | None = None) -> str:

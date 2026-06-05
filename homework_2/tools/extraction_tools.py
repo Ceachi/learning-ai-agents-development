@@ -1,12 +1,12 @@
 '''
 extract_invoice_tool + extract_contract_tool — the ExtractionPipeline exposed as
-agent tools (Lesson 3, §5: Chat Agent integration).
+agent tools.
 
 Each tool wraps the pure business logic (extraction.extract_document) behind a
 Pydantic params model + a descriptive docstring. The agent reads the docstrings
 and picks the right tool automatically — no manual if/else.
 
-Error handling (L3 §5, slide60): a tool ALWAYS returns a dict — never a raw
+Error handling: a tool ALWAYS returns a dict — never a raw
 exception. The agent can read {"success": False, "error": ...} and explain it to
 the user in natural language, and the ReAct loop keeps running even if a tool fails.
 

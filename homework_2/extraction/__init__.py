@@ -1,5 +1,5 @@
 '''
-Document extraction pipeline (Lesson 3): Load -> Chunk -> Extract -> Save.
+Document extraction pipeline: Load -> Chunk -> Extract -> Save.
 
 Public API:
   - load_document          : LOAD step (registry over file extension)
