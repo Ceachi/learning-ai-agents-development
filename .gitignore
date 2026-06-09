@@ -231,3 +231,6 @@ extracted_data/
 
 # macOS
 .DS_Store
+
+# homework_3 large data (documents, SQL dumps) — too big for git
+homework_3/data/
