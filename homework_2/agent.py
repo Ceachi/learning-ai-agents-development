@@ -30,6 +30,10 @@ from prompts.registry import get_prompt_registry
 # Load API keys from .env into os.environ before any client is created.
 load_dotenv()
 
+# Fetch the prompt registry once per script (lru_cache → shared singleton);
+# reuse this reference everywhere instead of calling the accessor repeatedly.
+prompt_registry = get_prompt_registry()
+
 
 # ---------------------------------------------------------------------------
 # LLM Factory
@@ -98,7 +102,7 @@ def build_system_prompt(prompt_name: str = "planner", **overrides) -> str:
         build_system_prompt(role="legal assistant")      # override one var
         build_system_prompt("analyst", field="finance")  # different prompt + var
     '''
-    return get_prompt_registry().render(prompt_name, **overrides)
+    return prompt_registry.render(prompt_name, **overrides)
 
 
 def build_user_message(question: str) -> str:
@@ -110,7 +114,7 @@ def build_user_message(question: str) -> str:
     Middle". It lives in its own reminder.yaml, applied at runtime rather than
     baked into the system prompt.
     '''
-    reminder = get_prompt_registry().render("reminder")
+    reminder = prompt_registry.render("reminder")
     return f"{question}\n{reminder}"
 
 
