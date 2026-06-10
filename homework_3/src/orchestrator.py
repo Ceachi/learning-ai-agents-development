@@ -11,6 +11,7 @@ Flow:
 TODO pentru studenți: node_evaluate, node_answer
 """
 import logging
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -98,9 +99,29 @@ class Orchestrator:
         """
         logger.info(f"[EVALUATE] iter {state.iteration}")
 
-        # TODO: implementează
+        results = state.rag_result.results if state.rag_result else []
+        context = "\n\n".join(f"[{r.file_name}]\n{r.content}" for r in results)
 
-        return {"feedback": OrchestratorFeedback(can_answer=False, missing_info="TODO")}
+        prompt = self.prompts.render(
+            "rag_evaluate",
+            query=state.query,
+            context=context or "(niciun rezultat găsit)",
+            max_score=state.rag_result.max_score if state.rag_result else 0.0,
+            avg_score=state.rag_result.avg_score if state.rag_result else 0.0,
+        )
+
+        response = self.llm.generate_sync([{"role": "user", "content": prompt}])
+
+        match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+        json_str = match.group(1) if match else response
+        try:
+            feedback = OrchestratorFeedback.model_validate_json(json_str)
+        except Exception as e:
+            logger.warning(f"[EVALUATE] parse failed ({e}); assuming cannot answer")
+            feedback = OrchestratorFeedback(can_answer=False, missing_info="parse error")
+
+        logger.info(f"[EVALUATE] can_answer={feedback.can_answer}")
+        return {"feedback": feedback}
 
     def node_answer(self, state: OrchestratorState) -> dict:
         """
@@ -125,9 +146,28 @@ class Orchestrator:
         """
         logger.info("[ANSWER]")
 
-        # TODO: implementează
+        results = state.rag_result.results if state.rag_result else []
+        context = "\n\n".join(f"[{r.file_name}]\n{r.content}" for r in results)
 
-        return {"answer": "TODO", "status": "failed"}
+        prompt = self.prompts.render(
+            "rag_answer",
+            query=state.query,
+            context=context or "(niciun rezultat găsit)",
+        )
+
+        answer = self.llm.generate_sync([{"role": "user", "content": prompt}])
+
+        # Status: success dacă orchestratorul a confirmat că poate răspunde;
+        # failed dacă n-avem deloc context; altfel partial (am răspuns pe ce am găsit).
+        if not results:
+            status = "failed"
+        elif state.feedback and state.feedback.can_answer:
+            status = "success"
+        else:
+            status = "partial"
+
+        logger.info(f"[ANSWER] status={status}")
+        return {"answer": answer, "status": status}
 
     # === ROUTING ===
 

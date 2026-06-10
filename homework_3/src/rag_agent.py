@@ -75,10 +75,47 @@ class RAGAgent:
         """
         logger.info(f"[REFINE] feedback={state.feedback is not None}")
 
-        # TODO: implementează
+        # Prima căutare (fără feedback) → folosim query-ul original ca atare.
+        if state.feedback is None:
+            return {"refined": RefinedQuery(query=state.query)}
 
-        # Placeholder: returnează query-ul original fără rafinare
-        return {"refined": RefinedQuery(query=state.query)}
+        # Avem feedback de la orchestrator → rezumăm ce am găsit până acum.
+        max_score = state.result.max_score if state.result else 0.0
+        avg_score = state.result.avg_score if state.result else 0.0
+        if state.result and state.result.results:
+            found_summary = "\n".join(
+                f"- [{r.file_name}] {r.summary or r.content[:120]}"
+                for r in state.result.results
+            )
+        else:
+            found_summary = "(nimic relevant găsit)"
+
+        prompt = self.prompts.render(
+            "rag_refine",
+            original_query=state.query,
+            current_query=state.current_query,
+            found_summary=found_summary,
+            max_score=max_score,
+            avg_score=avg_score,
+            current_threshold=state.current_threshold,
+            can_answer=state.feedback.can_answer,
+            missing_info=state.feedback.missing_info,
+            suggestion=state.feedback.suggestion,
+        )
+
+        response = self.llm.generate_sync([{"role": "user", "content": prompt}])
+
+        # Extrage blocul JSON (```json ... ```) și validează direct în Pydantic.
+        match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+        json_str = match.group(1) if match else response
+        try:
+            refined = RefinedQuery.model_validate_json(json_str)
+        except Exception as e:
+            logger.warning(f"[REFINE] parse failed ({e}); keeping current query")
+            refined = RefinedQuery(query=state.current_query)
+
+        logger.info(f"[REFINE] '{state.current_query}' → '{refined.query}'")
+        return {"refined": refined}
 
     def node_search(self, state: RAGAgentState) -> dict:
         """Caută chunks similare în pgvector. COMPLET - nu modifica."""
@@ -137,4 +174,7 @@ class RAGAgent:
     def run(self, query: str, feedback=None) -> RAGAgentState:
         """Execută agentul."""
         initial = RAGAgentState(query=query, feedback=feedback)
-        return self.graph.invoke(initial)
+        final = self.graph.invoke(initial)
+        # LangGraph returns the final state as a dict; rewrap into the typed state
+        # so callers (node_call_rag) can use attribute access.
+        return RAGAgentState(**final) if isinstance(final, dict) else final

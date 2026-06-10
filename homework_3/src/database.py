@@ -17,7 +17,10 @@ DATABASE_URL = os.getenv(
 )
 
 engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine)
+# expire_on_commit=False keeps ORM objects (e.g. DocumentChunk) usable after the
+# transaction() block commits/closes — node_search reads their attributes outside
+# the `with` block.
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 @contextmanager
