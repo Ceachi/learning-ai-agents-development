@@ -258,3 +258,11 @@ tools_catalog = ToolWrapper.to_prompt_string()
 ```bash
 cd src && python main.py
 ```
+
+## How to run each setion of the homework
+
+```bash
+cd src
+python main.py                                              # 1. Orchestrator + RAG
+python -c "from main import test_analyst; test_analyst()"   # 2. Analyst + NL2SQL
+```
