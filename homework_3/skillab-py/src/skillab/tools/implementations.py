@@ -26,11 +26,15 @@ def join_data(params: JoinDataParams) -> pd.DataFrame:
     Returns:
         DataFrame rezultat după join
     """
-    # TODO: implementează
-    # left_df = params.input_dfs[0]
-    # right_df = params.input_dfs[1]
-    # return pd.merge(left_df, right_df, left_on=params.left_key, right_on=params.right_key, how=params.how)
-    raise NotImplementedError("TODO: Implementează join_data")
+    left_df = params.input_dfs[0]
+    right_df = params.input_dfs[1]
+    return pd.merge(
+        left_df,
+        right_df,
+        left_on=params.left_key,
+        right_on=params.right_key,
+        how=params.how,
+    )
 
 
 @register_tool
@@ -50,13 +54,34 @@ def filter_data(params: FilterDataParams) -> pd.DataFrame:
     Returns:
         DataFrame filtrat
     """
-    # TODO: implementează
-    # df = params.input_dfs[0]
-    # col = df[params.column]
-    # if params.operator == "==":
-    #     mask = col == params.value
-    # elif params.operator == "contains":
-    #     mask = col.astype(str).str.contains(params.value, case=False, na=False)
-    # ...
-    # return df[mask]
-    raise NotImplementedError("TODO: Implementează filter_data")
+    df = params.input_dfs[0]
+    col = df[params.column]
+    op = params.operator
+    val = params.value
+
+    if op == "contains":
+        mask = col.astype(str).str.contains(val, case=False, na=False)
+    elif op in (">", "<", ">=", "<="):
+        # Numeric comparison: coerce both column and value to numbers.
+        numeric_col = pd.to_numeric(col, errors="coerce")
+        numeric_val = float(val)
+        if op == ">":
+            mask = numeric_col > numeric_val
+        elif op == "<":
+            mask = numeric_col < numeric_val
+        elif op == ">=":
+            mask = numeric_col >= numeric_val
+        else:
+            mask = numeric_col <= numeric_val
+    else:  # "==" or "!="
+        # Compare numerically when the column is numeric, otherwise as strings.
+        if pd.api.types.is_numeric_dtype(col):
+            try:
+                cmp_val = float(val)
+            except ValueError:
+                cmp_val = val
+            mask = col == cmp_val if op == "==" else col != cmp_val
+        else:
+            mask = col.astype(str) == val if op == "==" else col.astype(str) != val
+
+    return df[mask]

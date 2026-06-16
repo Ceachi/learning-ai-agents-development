@@ -68,9 +68,26 @@ class NL2SQLAgent:
         """
         logger.info(f"[GENERATE] {state.question}")
 
-        # TODO: implementează
+        schema = state.schema_context or self.schema
+        prompt = self.prompts.render(
+            "nl2sql_generate",
+            table_name=state.table_name,
+            table_description=schema.get("description", ""),
+            columns=schema.get("columns", {}),
+            business_rules=schema.get("business_rules", {}),
+            question=state.question,
+        )
 
-        return {"sql_query": "SELECT 1"}
+        response = self.llm.generate_sync([{"role": "user", "content": prompt}])
+
+        # Strip ```sql ... ``` fences if the LLM wrapped the query.
+        sql = response.strip()
+        match = re.search(r"```(?:sql)?\s*(.*?)\s*```", response, re.DOTALL)
+        if match:
+            sql = match.group(1).strip()
+
+        logger.info(f"[GENERATE] -> {sql[:80]}")
+        return {"sql_query": sql}
 
     def node_validate_sql(self, state: NL2SQLState) -> dict:
         """
@@ -81,10 +98,31 @@ class NL2SQLAgent:
         3. Verifică că e SELECT
         4. Return {"is_valid": bool, "validation_error": str}
         """
-        sql = state.sql_query
+        sql = (state.sql_query or "").strip()
         logger.info(f"[VALIDATE] {sql[:50]}...")
 
-        # TODO: implementează
+        if not sql:
+            return {"is_valid": False, "validation_error": "SQL gol"}
+
+        # 1. Block multiple statements (classic SQL-injection vector).
+        if sql.rstrip(";").count(";") > 0:
+            return {"is_valid": False, "validation_error": "Multiple statements interzise"}
+
+        # 2. Block mutating keywords (whole-word, so 'created_at' nu declanșează 'create').
+        if re.search(
+            r"\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|merge)\b",
+            sql,
+            re.IGNORECASE,
+        ):
+            return {"is_valid": False, "validation_error": "Cuvânt cheie interzis (doar SELECT)"}
+
+        # 3. Parse with sqlparse and require a SELECT statement.
+        parsed = sqlparse.parse(sql)
+        if not parsed:
+            return {"is_valid": False, "validation_error": "SQL neparsabil"}
+        stmt_type = parsed[0].get_type()
+        if stmt_type != "SELECT":
+            return {"is_valid": False, "validation_error": f"Doar SELECT permis (got: {stmt_type})"}
 
         return {"is_valid": True, "validation_error": ""}
 
@@ -98,9 +136,19 @@ class NL2SQLAgent:
         """
         logger.info("[EXECUTE]")
 
-        # TODO: implementează
+        from sqlalchemy import text
+        from database import transaction
 
-        return {"result": pd.DataFrame(), "execution_error": "TODO", "status": "failed"}
+        try:
+            with transaction() as session:
+                result = session.execute(text(state.sql_query))
+                df = pd.DataFrame(result.mappings().all())
+        except Exception as e:
+            logger.warning(f"[EXECUTE] failed: {e}")
+            return {"result": pd.DataFrame(), "execution_error": str(e)}
+
+        logger.info(f"[EXECUTE] {len(df)} rows")
+        return {"result": df, "status": "success", "execution_error": ""}
 
     def node_handle_error(self, state: NL2SQLState) -> dict:
         """
@@ -114,9 +162,37 @@ class NL2SQLAgent:
         """
         logger.info("[ERROR]")
 
-        # TODO: implementează
+        new_retry = state.retry_count + 1
+        error_msg = state.execution_error or state.validation_error
+        logger.info(f"[ERROR] retry {new_retry}/{state.max_retries}: {error_msg[:80]}")
 
-        return {"retry_count": state.retry_count + 1, "status": "failed"}
+        # No retries left → mark failed (router will route to END).
+        if new_retry >= state.max_retries:
+            return {"retry_count": new_retry, "status": "failed"}
+
+        # Ask the LLM to correct the SQL; router then loops back to generate_sql.
+        schema = state.schema_context or self.schema
+        prompt = self.prompts.render(
+            "nl2sql_error",
+            table_name=state.table_name,
+            question=state.question,
+            failed_sql=state.sql_query,
+            error_message=error_msg,
+            columns=schema.get("columns", {}),
+        )
+        response = self.llm.generate_sync([{"role": "user", "content": prompt}])
+
+        new_sql = response.strip()
+        match = re.search(r"```(?:sql)?\s*(.*?)\s*```", response, re.DOTALL)
+        if match:
+            new_sql = match.group(1).strip()
+
+        return {
+            "sql_query": new_sql,
+            "retry_count": new_retry,
+            "execution_error": "",
+            "validation_error": "",
+        }
 
     # === ROUTING ===
 
@@ -156,4 +232,7 @@ class NL2SQLAgent:
             table_name=self.table_name,
             max_retries=self.max_retries,
         )
-        return self.graph.invoke(initial)
+        final = self.graph.invoke(initial)
+        # LangGraph returns the final state as a dict; rewrap into the typed state
+        # so callers (analyst_agent._execute_query) can use attribute access.
+        return NL2SQLState(**final) if isinstance(final, dict) else final
