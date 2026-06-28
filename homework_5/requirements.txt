@@ -1,0 +1,21 @@
+# Install the skillab package from homework_3 editable, with all the extras
+# the homework_3 agents need (anthropic provider + RAG embeddings + pgvector).
+# This is the ONLY HW3 dependency — no source code is copied into HW5.
+-e ../homework_3/skillab-py[anthropic,rag,pgvector]
+
+# MCP server (Cerința 1 + 2)
+fastmcp>=0.2.0
+mcp>=1.0.0
+
+# Anthropic SDK — used directly by llm.py (the LLM-as-Judge guardrail)
+anthropic>=0.40.0
+
+# Pydantic v2 (Cerința 3 input schemas)
+pydantic>=2.0
+
+# LangGraph — imported at the agent boundary
+langgraph>=0.2.0
+
+# Utilities
+python-dotenv>=1.0.0
+pyyaml>=6.0

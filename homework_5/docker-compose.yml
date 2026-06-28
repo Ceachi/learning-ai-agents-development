@@ -1,0 +1,42 @@
+# Homework 5 — PostgreSQL (pgvector).
+#
+# Re-uses the `homework_3_pgdata` Docker volume that homework_3 created
+# the first time its docker-compose was run. That volume holds the
+# document_chunks + achizitii_directe + anunturi_initiere tables the
+# orchestrator and data_analyst agents query.
+#
+# Net effect: from inside homework_5/ you only ever need:
+#
+#     docker-compose up -d
+#
+# No need to cd into homework_3.
+#
+# Pre-condition (one time): the volume `homework_3_pgdata` must exist.
+# It is created automatically the first time anyone runs HW3's
+# docker-compose. If it doesn't exist yet, see README.md.
+#
+# Port 5433 (matching HW3's default) is chosen so HW4's Postgres on
+# 5432 keeps working alongside it.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: hw5-postgres
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo123
+      POSTGRES_DB: rag_demo
+    ports:
+      - "5433:5432"
+    volumes:
+      - homework_3_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d rag_demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  homework_3_pgdata:
+    external: true
