@@ -1,0 +1,74 @@
+# Development docker-compose with hot reloading
+# Usage: docker compose -f docker-compose.dev.yml up
+
+services:
+  # PostgreSQL with pgvector
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: skillab-db-dev
+    environment:
+      POSTGRES_USER: analyst
+      POSTGRES_PASSWORD: analyst
+      POSTGRES_DB: document_analyst
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+      - ./data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U analyst -d document_analyst"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - skillab-network-dev
+
+  # Backend - FastAPI with hot reload
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: skillab-backend-dev
+    environment:
+      - DATABASE_URL=postgresql://analyst:analyst@postgres:5432/document_analyst
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - skillab-network-dev
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+      - ./models:/app/models
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Frontend - Vite dev server
+  frontend:
+    image: node:20-alpine
+    container_name: skillab-frontend-dev
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    networks:
+      - skillab-network-dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://backend:8000
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
+networks:
+  skillab-network-dev:
+    driver: bridge
+
+volumes:
+  pgdata-dev:

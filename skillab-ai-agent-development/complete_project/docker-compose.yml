@@ -1,0 +1,75 @@
+services:
+  # PostgreSQL with pgvector
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: skillab-db
+    environment:
+      POSTGRES_USER: analyst
+      POSTGRES_PASSWORD: analyst
+      POSTGRES_DB: document_analyst
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U analyst -d document_analyst"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - skillab-network
+
+  # Backend - FastAPI
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: skillab-backend
+    environment:
+      - DATABASE_URL=postgresql://analyst:analyst@postgres:5432/document_analyst
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - skillab-network
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+
+  # Frontend - React + Vite (served by nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: skillab-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - skillab-network
+
+networks:
+  skillab-network:
+    driver: bridge
+
+volumes:
+  pgdata:
